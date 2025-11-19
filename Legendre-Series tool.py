@@ -6,45 +6,72 @@ from scipy.special import eval_legendre
 import pandas as pd
 import io
 
-st.set_page_config(page_title="勒讓德級數 (極速版)", layout="wide")
+# --- 1. 頁面設定 ---
+st.set_page_config(page_title="勒讓德級數視覺化 (高效能版)", layout="wide")
 
-# --- CSS 優化滑桿體驗 ---
+# CSS 微調：讓滑桿上方留點空間，比較好看
 st.markdown("""
 <style>
     .stSlider {padding-top: 20px;}
-    .block-container {padding-top: 2rem;}
+    h1 {margin-bottom: 0px;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ 勒讓德級數 (Legendre Series) - 極速渲染版")
-st.markdown("此版本採用 **預先計算 (Pre-calculation)** 技術，拖動滑桿時僅進行矩陣切片，實現絲滑般的即時繪圖。")
+st.title("🌊 勒讓德級數 (Legendre Series) 互動實驗室")
+st.markdown(r"""
+輸入函數 $f(x)$，系統將一次性計算所有係數。拖動滑桿可即時觀察不同階數的疊加結果。
+$$f(x) \approx \sum_{n=0}^{N} c_n P_n(x)$$
+""")
 
-# --- 1. 側邊欄設定 ---
-st.sidebar.header("1. 訊號設定")
+# --- 2. 側邊欄：範例選擇 (維持原位) ---
+st.sidebar.header("⚡ 快速範例選擇")
+
 example_options = {
-    "方波 (Square)": "where(x > 0, 1, 0)",
-    "三角波 (Triangle)": "where(x > 0, x, 0)",
+    "自訂輸入": "",
+    "--- 基礎波形 ---": "where(x > 0, 1, 0)", 
+    "方波 (Step)": "where(x > 0, 1, 0)",
+    "三角波 (Ramp)": "where(x > 0, x, 0)",
+    "絕對值 (V-Shape)": "abs(x)",
+    
+    "--- 週期/震盪 ---": "sign(sin(4 * pi * x))", 
     "多週期方波": "sign(sin(4 * pi * x))",
     "連續三角波": "arcsin(sin(5 * x))",
-    "高斯波包": "sin(15 * x) * exp(-5 * x**2)",
-    "自訂": ""
+    "高頻餘弦": "cos(5 * pi * x)",
+    
+    "--- 物理/調變 ---": "sin(15 * x) * exp(-5 * x**2)",
+    "波包 (Wave Packet)": "sin(15 * x) * exp(-5 * x**2)",
+    "AM 調變訊號": "(1 + 0.5 * cos(10 * x)) * cos(50 * x)",
+    
+    "--- 多極子 ---": "x",
+    "偶極子 (Dipole)": "x",
+    "四極子 (Quadrupole)": "3*x**2 - 1"
 }
-choice = st.sidebar.radio("選擇範例：", list(example_options.keys()))
-default_val = example_options[choice] if choice != "自訂" else "x"
 
-func_str = st.sidebar.text_input("f(x) 表達式：", value=default_val)
-max_N = st.sidebar.number_input("最大計算階數 (Max N)", value=50, min_value=10, max_value=200)
+# 過濾掉分隔線選項
+selectable_options = [k for k in example_options.keys() if not k.startswith("---")]
+selected_label = st.sidebar.radio("選擇波形模版：", selectable_options)
+
+# 根據選擇設定預設值
+default_func = "where(x > 0, 1, 0)"
+if selected_label != "自訂輸入":
+    default_func = example_options[selected_label]
 
 st.sidebar.markdown("---")
-st.sidebar.info("設定好後，請按下方按鈕進行一次性計算。")
+st.sidebar.info("💡 **小提示**：極座標圖中的 $x$ 對應於 $\cos(\\theta)$。這在物理場型分析中非常常見。")
 
-# --- 2. 核心計算引擎 (只在按鈕按下時執行) ---
-def precompute_everything(func_expr, max_n_val, num_points=500):
+# --- 3. 主介面輸入區 (維持原位) ---
+col_input, col_param = st.columns([3, 1])
+
+with col_input:
+    func_str = st.text_input("輸入 f(x) (支援 numpy 語法)", value=default_func)
+with col_param:
+    # 為了效能體驗，我們限制最大 N 不超過 200 (通常 50 就很夠了)
+    max_N_input = st.number_input("最大計算階數 Max N", value=50, min_value=5, max_value=200, step=5)
+
+# --- 4. 核心計算引擎 (預先計算並緩存) ---
+def precompute_data(func_expr, max_n_val, num_points=500):
     """
-    一次性計算所有需要的數據：
-    1. 目標函數值 (Target)
-    2. 所有係數 (Coefficients 0 to Max)
-    3. 所有多項式矩陣 (Polynomial Basis Matrix)
+    一次性執行積分與矩陣生成
     """
     # A. 準備座標
     x_vals = np.linspace(-1, 1, num_points)
@@ -54,9 +81,11 @@ def precompute_everything(func_expr, max_n_val, num_points=500):
     # B. 解析函數
     def f(x_in):
         allowed = {
-            "x": x_in, "np": np, "sin": np.sin, "cos": np.cos, 
+            "x": x_in, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan,
             "exp": np.exp, "pi": np.pi, "abs": np.abs, "sign": np.sign,
-            "where": np.where, "arcsin": np.arcsin, "legendre": eval_legendre
+            "where": np.where, "heaviside": np.heaviside,
+            "arcsin": np.arcsin, "arccos": np.arccos, "arctan": np.arctan,
+            "legendre": eval_legendre
         }
         return eval(func_expr, {"__builtins__": None}, allowed)
 
@@ -67,22 +96,22 @@ def precompute_everything(func_expr, max_n_val, num_points=500):
     except Exception as e:
         return None, f"函數解析錯誤: {e}"
 
-    # D. 計算係數 (耗時步驟)
+    # D. 積分計算係數
     coeffs = []
     data_list = []
     try:
         for n in range(max_n_val + 1):
             factor = (2 * n + 1) / 2
             integrand = lambda x: f(x) * eval_legendre(n, x)
-            val, _ = quad(integrand, -1, 1, limit=50) # limit設小一點加速
+            # limit 稍微調低以加速大量計算
+            val, _ = quad(integrand, -1, 1, limit=50)
             coeffs.append(factor * val)
-            data_list.append({"n": n, "cn": factor * val})
+            data_list.append({"Order (n)": n, "Coefficient (cn)": factor * val})
     except Exception as e:
-        return None, f"積分錯誤: {e}"
+        return None, f"積分過程錯誤: {e}"
 
-    # E. 預先計算多項式矩陣 (核心優化步驟!)
+    # E. 預先生成多項式矩陣 (加速關鍵)
     # 形狀: (Max_N+1, num_points)
-    # 這樣滑桿移動時不需要再呼叫 eval_legendre，只要查表即可
     poly_matrix_x = np.zeros((max_n_val + 1, num_points))
     poly_matrix_polar = np.zeros((max_n_val + 1, num_points))
     
@@ -97,74 +126,84 @@ def precompute_everything(func_expr, max_n_val, num_points=500):
         "y_target": y_target,
         "r_target": r_target,
         "coeffs": np.array(coeffs),
-        "poly_matrix_x": poly_matrix_x,         # Cache Cartesian basis
-        "poly_matrix_polar": poly_matrix_polar, # Cache Polar basis
+        "poly_matrix_x": poly_matrix_x,
+        "poly_matrix_polar": poly_matrix_polar,
         "df": pd.DataFrame(data_list)
     }
     return result, None
 
-# --- 3. 互動邏輯 ---
-if st.sidebar.button("🚀 執行計算 (Pre-compute)", type="primary"):
-    with st.spinner(f"正在計算前 {max_N} 階係數與矩陣，請稍候..."):
-        res, err = precompute_everything(func_str, max_N)
+# --- 5. 執行按鈕與狀態管理 ---
+if st.button("🚀 執行運算 (Pre-compute)", type="primary"):
+    with st.spinner(f"正在預先計算前 {max_N_input} 階的所有數據..."):
+        res, err = precompute_data(func_str, max_N_input)
+        
         if err:
             st.error(err)
+            st.session_state['viz_data'] = None
         else:
             st.session_state['viz_data'] = res
-            st.session_state['func_name'] = func_str
-            st.rerun() # 強制刷新以顯示滑桿
+            st.session_state['current_func'] = func_str
 
-# --- 4. 繪圖渲染層 (極輕量化) ---
-if 'viz_data' in st.session_state:
+# --- 6. 視覺化呈現 (只要 session_state 有資料就顯示) ---
+if st.session_state.get('viz_data'):
     data = st.session_state['viz_data']
     
-    # 確認當前的 max_N 是否與計算時一致 (避免改了側邊欄沒按計算)
-    current_max_computed = len(data['coeffs']) - 1
-    
-    st.success(f"✅ 計算完成！目標函數：`{st.session_state.get('func_name', '')}` (已緩存 {current_max_computed} 階數據)")
+    st.success(f"✅ 計算完成！現在可以拖動下方滑桿，享受即時渲染的效果。")
+    st.markdown("---")
 
-    # --- 滑桿 (Slider) ---
-    # 這裡的動作非常快，因為不做任何積分或函數生成
-    n_select = st.slider("調整顯示階數 (N)", 0, current_max_computed, 5)
+    # === 互動滑桿區 (瞬間反應) ===
+    max_n_available = len(data['coeffs']) - 1
+    
+    # 滑桿直接改變 n_select，Streamlit 重新執行時只跑下面的繪圖，不跑積分
+    n_select = st.slider("調整疊加階數 (N)", 0, max_n_available, max_n_available)
+    
+    # === 極速運算 (矩陣切片 + 點積) ===
+    # 數學: y = [c0...cn] • [P0...Pn]
+    c_slice = data['coeffs'][:n_select+1]
+    
+    y_approx = np.dot(c_slice, data['poly_matrix_x'][:n_select+1])
+    r_approx = np.dot(c_slice, data['poly_matrix_polar'][:n_select+1])
 
-    # --- 極速計算 (Matrix Dot Product) ---
-    # 數學原理： y = [c0, c1, ... cn] dot [P0(x), P1(x), ... Pn(x)]
-    # 只需要切片，不需要重算
-    
-    coeffs_slice = data['coeffs'][:n_select+1]
-    
-    # 直角座標近似
-    # (n+1) dot (n+1, 500) -> (500,)
-    y_approx = np.dot(coeffs_slice, data['poly_matrix_x'][:n_select+1])
-    
-    # 極座標近似
-    r_approx = np.dot(coeffs_slice, data['poly_matrix_polar'][:n_select+1])
-
-    # --- 繪圖 ---
+    # === 繪圖 ===
     fig = plt.figure(figsize=(14, 6))
     
-    # 左圖
+    # 左圖：直角座標
     ax1 = fig.add_subplot(1, 2, 1)
-    ax1.plot(data['x_vals'], data['y_target'], 'k--', alpha=0.3, label='Target')
-    ax1.plot(data['x_vals'], y_approx, 'r-', lw=2, label=f'Approx N={n_select}')
+    ax1.plot(data['x_vals'], data['y_target'], 'k--', alpha=0.3, label='Target f(x)')
+    ax1.plot(data['x_vals'], y_approx, 'r-', linewidth=2, label=f'Approx (N={n_select})')
     ax1.set_title("Cartesian View")
+    ax1.set_xlabel("x")
     ax1.set_ylim(np.min(data['y_target'])-0.5, np.max(data['y_target'])+0.5)
-    ax1.legend()
+    ax1.legend(loc='upper right')
     ax1.grid(alpha=0.3)
 
-    # 右圖
+    # 右圖：極座標
     ax2 = fig.add_subplot(1, 2, 2, projection='polar')
-    ax2.plot(data['theta_vals'], np.abs(data['r_target']), 'k--', alpha=0.3)
-    ax2.plot(data['theta_vals'], np.abs(r_approx), 'b-', lw=2)
+    ax2.plot(data['theta_vals'], np.abs(data['r_target']), 'k--', alpha=0.3, label='Target')
+    ax2.plot(data['theta_vals'], np.abs(r_approx), 'b-', linewidth=2, label='Approx')
     ax2.fill(data['theta_vals'], np.abs(r_approx), 'blue', alpha=0.1)
     ax2.set_title("Polar View (Directional)")
-    ax2.set_rticks([])
-
-    st.pyplot(fig)
+    ax2.set_rticks([]) # 隱藏雜亂刻度
     
-    # --- 數據下載區 ---
-    with st.expander("查看係數數據"):
-        st.dataframe(data['df'].head(n_select+1).style.format({"cn": "{:.6f}"}))
+    st.pyplot(fig)
 
-else:
-    st.info("👈 請在左側設定參數並按下「執行計算」")
+    # === 下載區 ===
+    col_dl1, col_dl2 = st.columns(2)
+
+    # 圖片下載
+    img_buf = io.BytesIO()
+    fig.savefig(img_buf, format='png', dpi=150)
+    img_buf.seek(0)
+    col_dl1.download_button("📥 下載當前圖表 (PNG)", img_buf, f"legendre_N{n_select}.png", "image/png")
+
+    # CSV 下載
+    df = data['df']
+    csv_data = df.to_csv(index=False).encode('utf-8')
+    col_dl2.download_button("📥 下載係數表 (CSV)", csv_data, "coefficients.csv", "text/csv")
+
+    with st.expander("查看詳細係數"):
+        # Highlighting current N row could be complex, just show data
+        st.dataframe(df.style.format({"Coefficient (cn)": "{:.6f}"}))
+
+elif not st.session_state.get('viz_data'):
+    st.info("👈 請確認上方參數後，按下「執行運算」按鈕。")
