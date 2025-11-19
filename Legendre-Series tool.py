@@ -7,7 +7,7 @@ import pandas as pd
 import io
 
 # --- 1. 頁面設定 ---
-st.set_page_config(page_title="勒讓德級數視覺化 (高效能版)", layout="wide")
+st.set_page_config(page_title="勒讓德級數視覺化", layout="wide")
 
 # CSS 微調：讓滑桿上方留點空間，比較好看
 st.markdown("""
