@@ -17,14 +17,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌊 勒讓德級數 (Legendre Series) 互動實驗室")
+st.title("勒讓德級數 (Legendre Series) 可視化")
 st.markdown(r"""
 輸入函數 $f(x)$，系統將一次性計算所有係數。拖動滑桿可即時觀察不同階數的疊加結果。
 $$f(x) \approx \sum_{n=0}^{N} c_n P_n(x)$$
 """)
 
 # --- 2. 側邊欄：範例選擇 (維持原位) ---
-st.sidebar.header("⚡ 快速範例選擇")
+st.sidebar.header("簡單範例")
 
 example_options = {
     "自訂輸入": "",
@@ -55,9 +55,6 @@ selected_label = st.sidebar.radio("選擇波形模版：", selectable_options)
 default_func = "where(x > 0, 1, 0)"
 if selected_label != "自訂輸入":
     default_func = example_options[selected_label]
-
-st.sidebar.markdown("---")
-st.sidebar.info("💡 **小提示**：極座標圖中的 $x$ 對應於 $\cos(\\theta)$。這在物理場型分析中非常常見。")
 
 # --- 3. 主介面輸入區 (維持原位) ---
 col_input, col_param = st.columns([3, 1])
@@ -133,7 +130,7 @@ def precompute_data(func_expr, max_n_val, num_points=500):
     return result, None
 
 # --- 5. 執行按鈕與狀態管理 ---
-if st.button("🚀 執行運算 (Pre-compute)", type="primary"):
+if st.button("執行運算 (Pre-compute)", type="primary"):
     with st.spinner(f"正在預先計算前 {max_N_input} 階的所有數據..."):
         res, err = precompute_data(func_str, max_N_input)
         
@@ -148,7 +145,7 @@ if st.button("🚀 執行運算 (Pre-compute)", type="primary"):
 if st.session_state.get('viz_data'):
     data = st.session_state['viz_data']
     
-    st.success(f"✅ 計算完成！現在可以拖動下方滑桿，享受即時渲染的效果。")
+    st.success(f"計算完成！可拖動下方滑桿感受逼近效果。")
     st.markdown("---")
 
     # === 互動滑桿區 (瞬間反應) ===
